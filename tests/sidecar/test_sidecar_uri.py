@@ -5,7 +5,9 @@ introduced when ``full_docs`` collapsed its four path fields to
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import pytest
 
@@ -125,6 +127,64 @@ def test_resolve_sidecar_uri_tolerates_missing_trailing_slash(tmp_path):
 )
 def test_resolve_sidecar_uri_returns_none_for_unsupported(uri):
     assert resolve_sidecar_uri(uri) is None
+
+
+@pytest.mark.offline
+@pytest.mark.parametrize(
+    "name",
+    [
+        "with space.docx.parsed",
+        "中文 报告.docx.parsed",
+        "literal%20lookalike.parsed",
+        "literal%2Flookalike.parsed",
+        "literal%25lookalike.parsed",
+    ],
+)
+def test_sidecar_uri_round_trips_awkward_names(tmp_path, name):
+    """A name that *looks* percent-encoded must survive the round trip.
+
+    The reader has to decode exactly once: ``url2pathname`` already decodes, so
+    unquoting first would rewrite the literal ``%20`` in ``literal%20lookalike``
+    as a space and silently point at a different artifact directory.
+    """
+    sidecar_dir = tmp_path / name
+    sidecar_dir.mkdir()
+    uri = sidecar_uri_for(sidecar_dir)
+
+    assert uri.endswith("/")
+    # The bug this pins: a path must never end up in the URI authority, which
+    # is what a hand-built ``file://`` + ``quote`` did with a drive letter.
+    assert urlsplit(uri).netloc == ""
+    assert resolve_sidecar_uri(uri) == sidecar_dir.resolve()
+
+
+@pytest.mark.offline
+@pytest.mark.parametrize(
+    "name",
+    [
+        "C:/data/demo.parsed",
+        "C:/data/a b.parsed",
+        "C:/data/中文.parsed",
+        "C:/data/report%20.parsed",
+        "C:/data/a%2Fb.parsed",
+        "C:/data/a%25b.parsed",
+    ],
+)
+def test_windows_drive_paths_round_trip(name):
+    """A drive-letter path must produce ``file:///C:/...``, not ``file://C%3A...``.
+
+    Asserted from the URI shape rather than from ``as_uri`` so the contract is
+    stated once: the authority is empty, the path is the path, and reading it
+    back yields the same directory.
+    """
+    if sys.platform != "win32":
+        pytest.skip("drive-letter paths are a Windows-only shape")
+    sidecar_dir = Path(name)
+    uri = sidecar_uri_for(sidecar_dir)
+
+    assert uri.startswith("file:///")
+    assert urlsplit(uri).netloc == ""
+    assert resolve_sidecar_uri(uri) == sidecar_dir
 
 
 @pytest.mark.offline
