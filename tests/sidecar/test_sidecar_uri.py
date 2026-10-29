@@ -102,6 +102,18 @@ def test_resolve_sidecar_uri_recovers_legacy_writer_uri():
 
 
 @pytest.mark.offline
+def test_resolve_sidecar_uri_recovers_legacy_writer_uri_with_literal_escape():
+    # Both halves of the defect at once: the previous writer put the whole drive
+    # path in the authority, and the directory name itself looks percent-encoded.
+    # The authority is decoded exactly once, so "%2520" must come back as the
+    # literal text "%20" -- a second decode would silently point at "demo dir.parsed".
+    uri = "file://C%3A%5Cdata%5Cdemo%2520dir.parsed/"
+    resolved = resolve_sidecar_uri(uri)
+    assert resolved is not None
+    assert str(resolved).replace("\\", "/") == "C:/data/demo%20dir.parsed"
+
+
+@pytest.mark.offline
 def test_resolve_sidecar_uri_preserves_literal_escape_like_names():
     uri = "file:///C:/data/report%2520.parsed/"
     resolved = resolve_sidecar_uri(uri)
